@@ -5,25 +5,28 @@
 #include <string.h>
 
 typedef struct probeStruct{
-	// BlockedProcess:Sender :Receiver
-	char blockedProcess[2];
-	char senderProcess[2];
-	char receiverProcess[2];
+	// BlockedProcess : Sender : Receiver
+	char *blockedProcess;
+	char *senderProcess;
+	char *receiverProcess;
 } Probe;
 
 Probe probe;
 char line[100];
 char *owners[20];
+char *requesters[20];
 char *token;
 char *procNum;
-int status,counter=0;
+char *resource;
+char *resourceOwner;
+int i,status,counter,counter2;
 pthread_t sender;
 pthread_t receiver; 
 void *senderThread();
 void *receiverThread();
+void findOwner();
 bool isBlocked = false;
 bool isDeadlocked = false;
-//struct probeStruct probeStruct;
 
 int main(int argc, char *argv[]) 
 {
@@ -33,39 +36,63 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 	else{
-		//procNum = atoi(argv[2]);
+		// Get process number argument
 		procNum = argv[2];
+
+		// Open configuration file
 		FILE *file = fopen(argv[1],"r");
 		if (file == 0){
 			printf("Error opening file.\n");
 		}else{
 			// Opened file successfully.	
-			printf("Process num: %s\n",procNum);
-			// Analyze config file, read relevant info and initialize state
-			// Loop through each line. Every line that contains "own" store in owners array
-			// EX: owners[0] = P1 owners[1] = owns owners[2] = r2	
+			// Store configuration file
 			while (fgets(line,100,file) != NULL){
-				printf("Line says: %s\n",line);
+				printf("Line: %s\n",line);
 				// If the line read contains owns, store it in owners array
 				if (strstr(line,"owns") != NULL){
+					
 					token = strtok(line, " ");
 					while (token != NULL){
-						owners[counter] = token;
+						// Don't need to store 'owns'
+						if (!strcmp(token,"owns")){
+							token = strtok(NULL, " ");
+							continue;
+						}
+						// Allocate space and copy token into array
+						owners[counter] = malloc(strlen(token) + 1);
+						strcpy(owners[counter], token);
 						token = strtok(NULL, " ");
 						counter++;
 					}
 				}else{
-					// We have a request line, see if it is my own process.
-					// if it is, set blocked 
+					// We have a request line, see if it is my own proces, block if it is
 					if (strstr(line,procNum)){
-						isBlocked = true;
+
+						token = strtok(line, " ");
+						while (token != NULL){
+							// Don't need to store 'requests'
+							if (!strcmp(token,"requests")){
+								token = strtok(NULL, " ");
+								continue;
+							}
+							// Allocate space and copy token into array
+							requesters[counter2] = malloc(strlen(token) + 1);
+							strcpy(requesters[counter2], token);
+							token = strtok(NULL, " ");
+							counter2++;
+						}	
+						isBlocked = true;	
 						printf("***** %s is blocking *****\n",procNum);
 					}
 
 				}
 			}
-			fclose(file);
-			printf("File closed.\n");			
+			printf("**** Done reading configuration ****\n");
+			fclose(file);	
+			
+			// If process is blocked, find the owner of resource i'm blocked on and form probe
+			if (isBlocked)
+				findOwner();	
 		}	
 	}
 
@@ -86,6 +113,8 @@ int main(int argc, char *argv[])
 		printf("Looping\n");
 		sleep(1);
 	}
+
+	printf("**** System is deadlocked ****");
 return 1;
 }
 
@@ -93,16 +122,49 @@ void *senderThread(void *arg){
 	while (isBlocked){
 		// Process is blocked
 		// Sends a Probe to the process owning the resource it is blocked on
-		printf("Sending probe: %s\n", (char*)arg);
-		sleep(10);
+		sleep(5);
+		printf("**** Sending probe: %s:%s:%s ****\n", probe.blockedProcess, probe.senderProcess, probe.receiverProcess);
 	}
 }
 void *receiverThread(void *arg){
 	// Check probe 1st and 3rd spots. If equal, deadlocked = true
 	if (isBlocked){
+		// Struct current probe = probe read
+		findOwner();
 		//modifies the Sender and Receiver fields and forwards the message to the process owning the resource it is blocked on. 	
 	}else{
-		// Discard probe - not blocked
+		probe.blockedProcess = NULL;
+		probe.senderProcess = NULL;
+		probe.receiverProcess = NULL;
 	}
 	printf("Testing receiver: %s\n", (char*)arg);
+}
+
+void findOwner(){
+	// Search through requesters. Find the resource i'm blocked on
+	while (1){
+		if (!strcmp(requesters[i],procNum)){
+			printf("%s wants %s\n",requesters[i],requesters[i+1]);
+			resource = requesters[i+1];
+			break;
+		}
+		i++;
+	}
+	i = 0;
+	// Search through owners. Find the owner of the resource i'm blocked on
+	while (1){
+		if (!strcmp(owners[i],resource)){
+			printf("%s owns %s\n",owners[i-1],owners[i]);
+			resourceOwner = owners[i-1];
+			break;
+		}
+		i++;	
+	}
+
+	// Form probe
+	probe.blockedProcess = procNum;
+	probe.senderProcess = procNum;
+	probe.receiverProcess = resourceOwner;
+	printf("%s:%s:%s\n",probe.blockedProcess,probe.senderProcess,probe.receiverProcess);
+	i = 0;
 }
