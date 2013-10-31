@@ -3,11 +3,12 @@
 #include <pthread.h> 
 #include <stdbool.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
 
 #define SIZE 50
+#define MAX_BUF 1024
 
 typedef struct probeStruct{
 	// BlockedProcess : Sender : Receiver
@@ -17,9 +18,9 @@ typedef struct probeStruct{
 } Probe;
 
 Probe probe;
+Probe temp;
 pthread_t sender;
 pthread_t receiver; 
-key_t key = 1234;
 char line[100];
 char *owners[20];
 char *requesters[20];
@@ -27,14 +28,14 @@ char *token;
 char *procNum;
 char *resource;
 char *resourceOwner;
-Probe *shm;
-Probe *temp;
-int i,status,counter,counter2,shmid;
+int i,status,counter,counter2,fd;
 bool isBlocked = false;
 bool isDeadlocked = false;
 void *senderThread();
 void *receiverThread();
 void findOwner();
+
+char buf[MAX_BUF];
 
 int main(int argc, char *argv[]) 
 {
@@ -100,26 +101,10 @@ int main(int argc, char *argv[])
 			
 			// If process is blocked, find the owner of resource i'm blocked on and form probe
 			if (isBlocked){
-				probe.blockedProcess = procNum;
 				findOwner();
 			}
 		}	
 	}
-	
-	// Create shared memory segment only on one process
-	if (procNum = "P1"){
-		if ((shmid = shmget(key,SIZE,IPC_CREAT | 0666)) < 0){
-			perror("Error creating memory segment.\n");
-			exit(1);
-		}
-	}
-
-	// Attach to shared memory segment
-	if ((shm = (Probe *)shmat(shmid,NULL,0)) == (Probe *) -1){
-		perror("Error attaching to shared memory segment");
-		exit(1);
-	}	
-
 	// Create sender thread
 	if ((status = pthread_create(&sender,NULL,senderThread,"Testing create")) != 0){
 		fprintf (stderr, "Error creating thread - Status: %d: %s\n", status, strerror(status));
@@ -134,7 +119,7 @@ int main(int argc, char *argv[])
 
 	// Main thread - loop while not deadlocked
 	while (!isDeadlocked) {
-		printf("Looping\n");
+		//printf("Looping\n");
 		sleep(1);
 	}
 
@@ -146,27 +131,43 @@ void *senderThread(void *arg){
 	while (isBlocked){
 		// Process is blocked
 		// Sends a Probe to the process owning the resource it is blocked on
-		*shm = probe;
-
-		temp = shm;
-		printf("Process %s read %s:%s:%s\n",procNum,temp->blockedProcess,temp->senderProcess,temp->receiverProcess);
-
-		sleep(5);
+		fd = open(resourceOwner, O_WRONLY);
+		printf("Writing %s:%s:%s\n",probe.blockedProcess, probe.senderProcess, probe.receiverProcess);
+		write(fd, probe, sizeof(Probe));
+		printf("%s wrote to the pipe\n",procNum);
+		//close(fd);
+		//unlink(resourceOwner);
+		sleep(10);
 		printf("**** Sending probe: %s:%s:%s ****\n", probe.blockedProcess, probe.senderProcess, probe.receiverProcess);
 	}
 }
 void *receiverThread(void *arg){
-	// Check probe 1st and 3rd spots. If equal, deadlocked = true
-	if (isBlocked){
-		// Struct current probe = probe read
-		findOwner();
-		//modifies the Sender and Receiver fields and forwards the message to the process owning the resource it is blocked on. 	
-	}else{
-		probe.blockedProcess = NULL;
-		probe.senderProcess = NULL;
-		probe.receiverProcess = NULL;
+	while (1){
+		// Listen for probe - Look for any pipe with a name equivalent to process number
+		// this means there is a process that wishes to contact us.
+		if (fd = open(procNum, O_RDONLY) < 0){
+			printf("I am %s and noone is trying to contact me.\n",procNum);
+		}else{
+			printf("I am %s and someone is trying to contact me.\n",procNum);
+			//read(fd, buf, MAX_BUF);
+			printf("Attempting to read from pipe\n");
+			read(fd,temp,sizeof(Probe));
+			printf("Read from pipe\n");
+			printf("I am %s and I just read: %s:%s:%s\n",procNum,temp.blockedProcess, temp.senderProcess, temp.receiverProcess);
+		}
+		// Check probe 1st and 3rd spots. If equal, deadlocked = true
+		if (isBlocked){
+			// Struct current probe = probe read
+			// findOwner();
+			//modifies the Sender and Receiver fields and forwards the message to the process owning the resource it is blocked on. 	
+		}else{
+			probe.blockedProcess = NULL;
+			probe.senderProcess = NULL;
+			probe.receiverProcess = NULL;
+		}
+		printf("Testing receiver: %s\n", (char*)arg);
+		sleep(5);
 	}
-	printf("Testing receiver: %s\n", (char*)arg);
 }
 
 void findOwner(){
@@ -189,10 +190,12 @@ void findOwner(){
 		}
 		i++;	
 	}
-
-	// Form probe	
+	// Create pipe/file
+	mkfifo(resourceOwner,0666);
+	printf("pipe created\n");	
+	// Form probe
+	probe.blockedProcess = procNum;	
 	probe.senderProcess = procNum;
 	probe.receiverProcess = resourceOwner;
-	printf("%s:%s:%s\n",probe.blockedProcess,probe.senderProcess,probe.receiverProcess);
 	i = 0;
 }
