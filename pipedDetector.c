@@ -158,7 +158,6 @@ void *receiverThread(){
 					printf("%s detected deadlock because %s = %s\n",procNum,probes[0],probes[2]);
 					close (fd);
 					unlink (procNum);
-					free(requesters[0]);
 					isDeadlocked = true;
 				}		
 				strcpy(probes[1],procNum);
